@@ -1,7 +1,7 @@
 FLAGS = -g -Wall
 CC    = gcc
 
-%.o : %.c %.h
+%.o : %.c
 	$(CC) -c $^ $(FLAGS)
 
 local: local.o common.o

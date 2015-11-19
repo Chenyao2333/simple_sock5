@@ -30,6 +30,12 @@ void send_reply(int clifd, uint8_t rep, uint16_t port) {
 void parse_request(struct sockaddr_in *dst_addr, char buff[], int buff_cnt) {
     char domain[256];
 
+    printf("buff_cnt = %d\n", buff_cnt);
+    for (int i = 0; i < buff_cnt; i++) {
+        printf("[%d]", (int)buff[i]);
+    }
+    printf("\n");
+
     dst_addr->sin_family = AF_INET;
     memcpy(&dst_addr->sin_port, &buff[buff_cnt-2], 2);
 
@@ -39,7 +45,7 @@ void parse_request(struct sockaddr_in *dst_addr, char buff[], int buff_cnt) {
             break;
         case 0x03: // domain
             memcpy(domain, &buff[5], buff[4]);
-            domain[buff[4]-1] = 0;
+            domain[buff[4]] = 0;
 
             struct hostent *hostt = gethostbyname(domain);
             if (hostt == NULL) {
