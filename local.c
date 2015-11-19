@@ -143,11 +143,15 @@ void socks5_server(int clifd) {
     }
     send_reply(clifd, 0x00, dst_addr.sin_port);
 
+    /*
     forward(clifd, dstfd);
     forward(dstfd, clifd);
 
     close(clifd);
     close(dstfd);
+    */
+
+    bd_forword(clifd, dstfd);
 }
 
 int main(int argc, const char *argv[]) {

@@ -13,8 +13,10 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/ioctl.h>
 
 void sendall(int fd, char buff[], int buff_size);
 void forward(int srcfd, int dstfd);
+void bd_forword(int srcfd, int dstfd);
 
 #endif // #ifndef _H_COMMON
