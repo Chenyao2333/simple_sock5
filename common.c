@@ -1,5 +1,11 @@
 #include "common.h"
 
+int set_non_blocking(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0) return flags;
+    return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+
 void sendall(int fd, char buff[], int buff_size) {
     int buff_cnt = 0, n;
     while (buff_cnt < buff_size) {
@@ -7,7 +13,7 @@ void sendall(int fd, char buff[], int buff_size) {
             syslog(LOG_ERR, "%s", strerror(errno));
         }
         buff_cnt += n;
-        printf("success send %d byte.\n", n);
+        // printf("success send %d byte.\n", n);
     }
 }
 
@@ -24,7 +30,7 @@ void forward(int srcfd, int dstfd) {
             syslog(LOG_ERR, "%s", strerror(errno));
             close(srcfd);
             close(dstfd);
-            exit(0);
+            pthread_exit(NULL);
         }
         buff[n] = 0;
         // printf("recv:\n%s\n", buff);
@@ -39,21 +45,22 @@ void recv_send(int fd1, int fd2) {
     int n = recv(fd1, buff, BUFFSIZE, 0);
     if (n == 0) {
         fprintf(stderr, "closed connection.\n");
-        exit(0);
+        close(fd1); close(fd2);
+        pthread_exit(NULL);
     }
-    printf("recv %d bytes.\n", n);
+    // printf("recv %d bytes.\n", n);
     if (send(fd2, buff, n, 0) != n) {
         fprintf(stderr, "test!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!can not send all data in one time!\n");
-        exit(-1);
+        close(fd1); close(fd2);
+        pthread_exit(NULL);
     }
 }
 void bd_forword(int fd1, int fd2) {
     fd_set readset;
     int max_fd = (fd1 > fd2 ? fd1 : fd2) + 1;
-    int on = 1;
 
-    ioctl(fd1, FIONBIO, (char *) &on);
-    ioctl(fd2, FIONBIO, (char *) &on);
+    set_non_blocking(fd1);
+    set_non_blocking(fd2);
 
     while (1) {
         FD_ZERO(&readset);
@@ -63,7 +70,8 @@ void bd_forword(int fd1, int fd2) {
         int n = select(max_fd, &readset, NULL, NULL, NULL);
         if (n < 0) {
             fprintf(stderr, "bd_forword: %s\n", strerror(errno));
-            exit(-1);
+            close(fd1); close(fd2);
+            pthread_exit(NULL);
         }
 
         if (FD_ISSET(fd1, &readset)) {

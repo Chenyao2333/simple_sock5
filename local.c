@@ -30,11 +30,13 @@ void send_reply(int clifd, uint8_t rep, uint16_t port) {
 void parse_request(struct sockaddr_in *dst_addr, char buff[], int buff_cnt) {
     char domain[256];
 
+    /*
     printf("buff_cnt = %d\n", buff_cnt);
     for (int i = 0; i < buff_cnt; i++) {
         printf("[%d]", (int)buff[i]);
     }
     printf("\n");
+    */
 
     dst_addr->sin_family = AF_INET;
     memcpy(&dst_addr->sin_port, &buff[buff_cnt-2], 2);
@@ -46,17 +48,18 @@ void parse_request(struct sockaddr_in *dst_addr, char buff[], int buff_cnt) {
         case 0x03: // domain
             memcpy(domain, &buff[5], buff[4]);
             domain[buff[4]] = 0;
+            fprintf(stdout, "request domain is: %s\n", domain);
 
             struct hostent *hostt = gethostbyname(domain);
             if (hostt == NULL) {
-                fprintf(stderr, "gethostbyname error for host: %s: %s",
+                fprintf(stderr, "gethostbyname error for host: %s: %s\n",
                         domain, hstrerror(h_errno));
             }
 
             memcpy(&dst_addr->sin_addr.s_addr, *(hostt->h_addr_list), 4);
             break;
         default:
-            fprintf(stderr, "ipv6 is unsupproted now.");
+            fprintf(stderr, "ipv6 is unsupproted now.\n");
     }
 }
 
@@ -76,25 +79,27 @@ int is_complete_request(char buff[], int buff_cnt) {
     return buff_cnt >= len;
 }
 
-void socks5_server(int clifd) {
+void *socks5_server(void *clifd_p) {
+    int clifd = *((int *)clifd_p);
+    free(clifd_p);
     char buff[BUFFSIZE];
     int buff_cnt = 0, n;
 
     while (1) {
         n = recv(clifd, buff + buff_cnt, BUFFSIZE - buff_cnt, 0);
-        if (n < 0) {
-            syslog(LOG_ERR, "%s", strerror(errno));
+        if (n <= 0) {
+            if (n < 0) fprintf(stderr, "recv authentication info: %s\n", strerror(errno));
             close(clifd);
-            exit(-1);
+            pthread_exit(NULL);
         }
         buff_cnt += n;
 
         if (buff_cnt >= 1 && buff[0] != 0x05) { 
             // syslog(LOG_INFO, "unsupported protocol version.");
-            printf("unsupported protocol version.\n");
+            printf("unsupported protocol version.");
             send_method_selc_msg(clifd, 0xFF);
             close(clifd);
-            exit(-1);
+            pthread_exit(NULL);
         }
         if (buff_cnt >= 2 && buff_cnt - 2 >= buff[1]) {
             printf("pass authentication.\n");
@@ -111,19 +116,18 @@ void socks5_server(int clifd) {
     while (1) {
         n = recv(clifd, buff + buff_cnt, BUFFSIZE - buff_cnt, 0);
         if (n <= 0) {
-            // syslog(LOG_ERR, "%s", strerror(errno));
-            printf("%s", strerror(errno));
+            if (n < 0) fprintf(stderr, "recv request: %s\n", strerror(errno));
             close(clifd);
-            exit(-1);
+            pthread_exit(NULL);
         }
         buff_cnt += n;
 
         if (is_complete_request(buff, buff_cnt)) {
             if (buff[1] != 0x01) { // CMD is not CONNECT
-                // syslog(LOG_INFO, "command not supported");
-                printf("command not supported");
+                fprintf(stderr, "command not supported\n");
                 send_reply(clifd, 0x07, 0);
-                exit(-1);
+                close(clifd);
+                pthread_exit(NULL);
             }
             parse_request(&dst_addr, buff, buff_cnt);
             break;
@@ -137,9 +141,9 @@ void socks5_server(int clifd) {
     int dstfd = socket(AF_INET, SOCK_STREAM, 0);
     if (connect(dstfd, (struct sockaddr *) &dst_addr, sizeof(dst_addr)) < 0) {
         send_reply(clifd, 0x05, 0); // connection refused
-        // syslog(LOG_ERR, "%s", strerror(errno));
-        printf("%s\n", strerror(errno));
-        exit(-1);
+        fprintf(stderr, "connect: %s\n", strerror(errno));
+        close(clifd); close(dstfd);
+        pthread_exit(NULL);
     }
     send_reply(clifd, 0x00, dst_addr.sin_port);
 
@@ -155,19 +159,17 @@ void socks5_server(int clifd) {
 }
 
 int main(int argc, const char *argv[]) {
-    // struct socks5_reply sr;
-    // printf("socks5_reply len = %d\n", sizeof(sr));
     if (argc != 2) {
-        printf("usage: %s <server_port>\n", argv[0]);
+        fprintf(stdout, "usage: %s <server_port>\n", argv[0]);
         exit(-1);
     }
     
     int listenfd;
     if ((listenfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        // syslog(LOG_ERR, "%s\n", strerror(errno));
-        printf("%s\n", strerror(errno));
+        fprintf(stdout, "creat socket: %s\n", strerror(errno));
         exit(-1);
     }
+
     int sock_reuse = 1;
     setsockopt(listenfd, SOL_SOCKET, SO_REUSEADDR, (char *) &sock_reuse, sizeof(sock_reuse));
 
@@ -178,32 +180,30 @@ int main(int argc, const char *argv[]) {
     servaddr.sin_port = htons(atoi(argv[1]));
 
     if (bind(listenfd, (struct sockaddr*) &servaddr, sizeof(servaddr)) < 0) {
-        // syslog(LOG_ERR, "%s", strerror(errno));
-        printf("%s\n", strerror(errno));
+        fprintf(stderr, "bind: %s\n", strerror(errno));
         exit(-1);
     }
-    listen(listenfd, 5);
+    listen(listenfd, 1024);
 
     while (1) {
         struct sockaddr_in cliaddr;
         socklen_t cli_len = sizeof(cliaddr);
         int connfd = accept(listenfd, (struct sockaddr*) &cliaddr, &cli_len);
         if (connfd < 0) {
-            fprintf(stderr, "%s\n", strerror(errno));
+            fprintf(stderr, "accept: %s\n", strerror(errno));
             continue;
         }
         char buff[100];
-        printf("connect from %s:%d\n",
-               inet_ntop(AF_INET, &cliaddr.sin_addr, buff, sizeof(buff)),
-               ntohs(cliaddr.sin_port));
+        fprintf(stdout, "connect from %s:%d\n",
+                inet_ntop(AF_INET, &cliaddr.sin_addr, buff, sizeof(buff)),
+                ntohs(cliaddr.sin_port));
 
-        pid_t child_pid;
-        if ((child_pid = fork()) == 0) { // child process
-            close(listenfd);
-            socks5_server(connfd);
-            exit(0);
-        } else { // parent process
-            close(connfd);
+        pthread_t tid;
+        int *p_connfd = malloc(sizeof(*p_connfd));
+        *p_connfd = connfd; // After this loop ending, the &connfd is be released, so cannot directly pass &connfd as args!!! It's spend me 3 hours!
+        errno = pthread_create(&tid, NULL, socks5_server, p_connfd);
+        if (errno) {
+            fprintf(stderr, "pthread_create: %s\n", strerror(errno));
         }
     }
     return 0;

@@ -9,14 +9,18 @@
 #include <unistd.h>
 #include <syslog.h>
 #include <netdb.h>
+#include <pthread.h>
+#include <fcntl.h>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/ioctl.h>
 
+int set_non_blocking(int fd);
+
 void sendall(int fd, char buff[], int buff_size);
 void forward(int srcfd, int dstfd);
 void bd_forword(int srcfd, int dstfd);
 
-#endif // #ifndef _H_COMMON
+#endif // _H_COMMON
