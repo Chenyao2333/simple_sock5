@@ -1,4 +1,6 @@
 *.o
 *.swp
 local
+remote
 .DS_Store
+
