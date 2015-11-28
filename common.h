@@ -18,9 +18,9 @@
 #include <sys/ioctl.h>
 
 int set_non_blocking(int fd);
+int enc_recv(int fd, char *buff, int buff_size, int flags);
 
-void sendall(int fd, char buff[], int buff_size);
-void forward(int srcfd, int dstfd);
+void enc_sendall(int fd, char buff[], int buff_size);
 void bd_forword(int srcfd, int dstfd);
 
 #endif // _H_COMMON

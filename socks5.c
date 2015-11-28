@@ -1,10 +1,11 @@
-#include "common.h"
+#include "socks5.h"
 
 #define BUFFSIZE 4096
 
+#ifdef IS_REMOTE
 void send_method_selc_msg(int clifd, char method) {
     char buff[2] = {0x05, method};
-    sendall(clifd, buff, 2);
+    enc_sendall(clifd, buff, 2);
 }
 
 struct socks5_reply {
@@ -24,7 +25,7 @@ void send_reply(int clifd, uint8_t rep, uint16_t port) {
     reply.rep = rep;
     reply.atyp = 0x01;
     reply.port = htons(port);
-    sendall(clifd, (char *) &reply, 10);
+    enc_sendall(clifd, (char *) &reply, 10);
 }
 
 void parse_request(struct sockaddr_in *dst_addr, char buff[], int buff_cnt) {
@@ -54,12 +55,10 @@ void parse_request(struct sockaddr_in *dst_addr, char buff[], int buff_cnt) {
             if (hostt == NULL) {
                 fprintf(stderr, "gethostbyname error for host: %s: %s\n",
                         domain, hstrerror(h_errno));
+                break;
             }
 
             memcpy(&dst_addr->sin_addr.s_addr, *(hostt->h_addr_list), 4);
-            break;
-        default:
-            fprintf(stderr, "ipv6 is unsupproted now.\n");
     }
 }
 
@@ -72,7 +71,7 @@ int is_complete_request(char buff[], int buff_cnt) {
     } else if (buff[3] == 0x03) { // domain name
         len += 1 + buff[4];
     } else if (buff[3] == 0x04) { // ipv6
-        len = 16;
+        len += 16;
     }
     
     // printf("buff_cnt should is %d, actual buff_cnt is %d\n", len, buff_cnt);
@@ -86,7 +85,7 @@ void *socks5_server(void *clifd_p) {
     int buff_cnt = 0, n;
 
     while (1) {
-        n = recv(clifd, buff + buff_cnt, BUFFSIZE - buff_cnt, 0);
+        n = enc_recv(clifd, buff + buff_cnt, BUFFSIZE - buff_cnt, 0);
         if (n <= 0) {
             if (n < 0) fprintf(stderr, "recv authentication info: %s\n", strerror(errno));
             close(clifd);
@@ -114,7 +113,7 @@ void *socks5_server(void *clifd_p) {
 
     buff_cnt = 0;
     while (1) {
-        n = recv(clifd, buff + buff_cnt, BUFFSIZE - buff_cnt, 0);
+        n = enc_recv(clifd, buff + buff_cnt, BUFFSIZE - buff_cnt, 0);
         if (n <= 0) {
             if (n < 0) fprintf(stderr, "recv request: %s\n", strerror(errno));
             close(clifd);
@@ -147,27 +146,55 @@ void *socks5_server(void *clifd_p) {
     }
     send_reply(clifd, 0x00, dst_addr.sin_port);
 
-    /*
-    forward(clifd, dstfd);
-    forward(dstfd, clifd);
+    bd_forword(clifd, dstfd);
+}
+#endif
 
-    close(clifd);
-    close(dstfd);
-    */
+#ifdef IS_LOCAL
+struct sockaddr_in remote_addr;
+void *relay(void *p_clifd) {
+    int clifd = *((int *)p_clifd);
+    free(p_clifd);
+
+    struct sockaddr_in dst_addr;
+    memcpy(&dst_addr, &remote_addr, sizeof(dst_addr));
+    char buff[32];
+    printf("remote address: %s:%d\n",
+           inet_ntop(AF_INET, &dst_addr.sin_addr, buff, sizeof(buff)),
+           ntohs(dst_addr.sin_port));
+    int dstfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (connect(dstfd, (struct sockaddr *) &dst_addr, sizeof(dst_addr)) < 0) {
+        fprintf(stderr, "conot connect to remote server: %s\n", strerror(errno));
+        close(clifd);
+        pthread_exit(NULL);
+    }
 
     bd_forword(clifd, dstfd);
 }
+#endif
 
 int main(int argc, const char *argv[]) {
+# ifdef IS_REMOTE
     if (argc != 2) {
-        fprintf(stdout, "usage: %s <server_port>\n", argv[0]);
-        exit(-1);
+        fprintf(stderr, "usage: %s <server_port>\n", argv[0]);
+        exit(1);
     }
+# else
+    if (argc != 4) {
+        fprintf(stderr, "usage: %s <local_port> <server_address> <server_port>\n", argv[0]);
+        exit(1);
+    }
+
+    memset(&remote_addr, 0, sizeof(remote_addr));
+    remote_addr.sin_family = AF_INET;
+    inet_pton(AF_INET, argv[2], &remote_addr.sin_addr);
+    remote_addr.sin_port = htons(atoi(argv[3]));
+# endif
     
     int listenfd;
     if ((listenfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         fprintf(stdout, "creat socket: %s\n", strerror(errno));
-        exit(-1);
+        exit(1);
     }
 
     int sock_reuse = 1;
@@ -178,12 +205,16 @@ int main(int argc, const char *argv[]) {
     servaddr.sin_family = AF_INET;
     servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
     servaddr.sin_port = htons(atoi(argv[1]));
+    char buff[32];
 
     if (bind(listenfd, (struct sockaddr*) &servaddr, sizeof(servaddr)) < 0) {
         fprintf(stderr, "bind: %s\n", strerror(errno));
-        exit(-1);
+        exit(1);
     }
     listen(listenfd, 1024);
+    fprintf(stdout, "service on %s:%d\n",
+            inet_ntop(AF_INET, &servaddr.sin_addr, buff, sizeof(buff)),
+            ntohs(servaddr.sin_port));
 
     while (1) {
         struct sockaddr_in cliaddr;
@@ -193,7 +224,6 @@ int main(int argc, const char *argv[]) {
             fprintf(stderr, "accept: %s\n", strerror(errno));
             continue;
         }
-        char buff[100];
         fprintf(stdout, "connect from %s:%d\n",
                 inet_ntop(AF_INET, &cliaddr.sin_addr, buff, sizeof(buff)),
                 ntohs(cliaddr.sin_port));
@@ -201,7 +231,11 @@ int main(int argc, const char *argv[]) {
         pthread_t tid;
         int *p_connfd = malloc(sizeof(*p_connfd));
         *p_connfd = connfd; // After this loop ending, the &connfd is be released, so cannot directly pass &connfd as args!!! It's spend me 3 hours!
+#ifdef IS_REMOTE
         errno = pthread_create(&tid, NULL, socks5_server, p_connfd);
+#else
+        errno = pthread_create(&tid, NULL, relay, p_connfd);
+#endif
         if (errno) {
             fprintf(stderr, "pthread_create: %s\n", strerror(errno));
         }

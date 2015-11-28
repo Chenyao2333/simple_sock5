@@ -1,13 +1,27 @@
 #include "common.h"
 
+#define BUFFSIZE 1024
+#define XOR_ENC_KEY 169
 int set_non_blocking(int fd) {
     int flags = fcntl(fd, F_GETFL, 0);
     if (flags < 0) return flags;
     return fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 }
 
-void sendall(int fd, char buff[], int buff_size) {
+int enc_recv(int fd, char *buff, int buff_size, int flags) {
+    int n = recv(fd, buff, buff_size, flags);
+    for (int i = 0; i < n; i++) {
+        buff[i] ^= XOR_ENC_KEY;
+    }
+    return n;
+}
+
+
+void enc_sendall(int fd, char buff[], int buff_size) {
     int buff_cnt = 0, n;
+    for (int i = 0; i < buff_size; i++) {
+        buff[i] ^= XOR_ENC_KEY;
+    }
     while (buff_cnt < buff_size) {
         if ((n = send(fd, buff + buff_cnt, buff_size - buff_cnt, 0)) < 0) {
             syslog(LOG_ERR, "%s", strerror(errno));
@@ -17,32 +31,9 @@ void sendall(int fd, char buff[], int buff_size) {
     }
 }
 
-void forward(int srcfd, int dstfd) {
-    pid_t child_pid= fork();
-    if (child_pid != 0) {
-        return ;
-    }
-
-    char buff[4096];
-    int n;
-    while (1) {
-        if ((n = recv(srcfd, buff, 4096, 0)) <= 0) {
-            syslog(LOG_ERR, "%s", strerror(errno));
-            close(srcfd);
-            close(dstfd);
-            pthread_exit(NULL);
-        }
-        buff[n] = 0;
-        // printf("recv:\n%s\n", buff);
-
-        sendall(dstfd, buff, n);
-    }
-}
-
 void recv_send(int fd1, int fd2) {
-    #define BUFFSIZE 4096
     char buff[BUFFSIZE];
-    int n = recv(fd1, buff, BUFFSIZE, 0);
+    int n = enc_recv(fd1, buff, BUFFSIZE, 0);
     if (n == 0) {
         fprintf(stderr, "closed connection.\n");
         close(fd1); close(fd2);
