@@ -3,4 +3,4 @@
 local
 remote
 .DS_Store
-
+*.dSYM
