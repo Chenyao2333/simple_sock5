@@ -1,5 +1,5 @@
 CC    = gcc
-FLAGS = -g -Wall
+FLAGS = -g -Wall -std=c99 -pthread
 
 REMOTE_FLAG = -DIS_REMOTE
 LOCAL_FLAG  = -DIS_LOCAL
