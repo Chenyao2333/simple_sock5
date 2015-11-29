@@ -24,11 +24,11 @@ void send_reply(int clifd, uint8_t rep, uint16_t port) {
     reply.ver = 0x05;
     reply.rep = rep;
     reply.atyp = 0x01;
-    reply.port = htons(port);
+    reply.port = port;
     enc_sendall(clifd, (char *) &reply, 10);
 }
 
-void parse_request(struct sockaddr_in *dst_addr, char buff[], int buff_cnt) {
+int parse_request(struct sockaddr_in *dst_addr, char buff[], int buff_cnt) {
     char domain[256];
 
     /*
@@ -53,13 +53,17 @@ void parse_request(struct sockaddr_in *dst_addr, char buff[], int buff_cnt) {
 
             struct hostent *hostt = gethostbyname(domain);
             if (hostt == NULL) {
-                fprintf(stderr, "gethostbyname error for host: %s: %s\n",
-                        domain, hstrerror(h_errno));
+                // I don't know why follow statement will cause Segmentitaion fault.
+                // fprintf(stderr, "gethostbyname error for host: %s: %s\n",
+                //         domain, hstrerror(h_errno));
+                return -1;
                 break;
             }
 
             memcpy(&dst_addr->sin_addr.s_addr, *(hostt->h_addr_list), 4);
+            break;
     }
+    return 0;
 }
 
 int is_complete_request(char buff[], int buff_cnt) {
@@ -128,12 +132,18 @@ void *socks5_server(void *clifd_p) {
                 close(clifd);
                 pthread_exit(NULL);
             }
-            parse_request(&dst_addr, buff, buff_cnt);
+            if (parse_request(&dst_addr, buff, buff_cnt) < 0) {
+                fprintf(stderr, "perhaps occurs some error at query dns");
+                send_reply(clifd, 0xFF, 0);
+                close(clifd);
+                pthread_exit(NULL);
+            }
             break;
         }
     }
 
-    printf("destition is %s:%d\n",
+    printf("clifd: %d destition is %s:%d\n",
+           clifd,
            inet_ntop(AF_INET, &dst_addr.sin_addr, buff, sizeof(buff)),
            ntohs(dst_addr.sin_port));
 
@@ -224,7 +234,8 @@ int main(int argc, const char *argv[]) {
             fprintf(stderr, "accept: %s\n", strerror(errno));
             continue;
         }
-        fprintf(stdout, "connect from %s:%d\n",
+        fprintf(stdout, "clifd: %d connect from %s:%d\n",
+                connfd,
                 inet_ntop(AF_INET, &cliaddr.sin_addr, buff, sizeof(buff)),
                 ntohs(cliaddr.sin_port));
 

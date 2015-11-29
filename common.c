@@ -1,6 +1,6 @@
 #include "common.h"
 
-#define BUFFSIZE 4096
+#define BUFFSIZE (4096*32)
 #define XOR_ENC_KEY 169
 
 int set_non_blocking(int fd) {
@@ -74,22 +74,38 @@ void bd_forword(int fd1, int fd2) {
 
     char buff1[BUFFSIZE], buff2[BUFFSIZE];
     int buff1_cnt = 0, buff2_cnt = 0;
+    int fd1_closed = 0, fd2_closed = 0;
 
     while (1) {
         FD_ZERO(&readset);
         FD_ZERO(&writeset);
 
-        if (buff1_cnt < BUFFSIZE) {
-            FD_SET(fd1, &readset);
+        // it's troublesome when the buff is not empty after a fd closed
+        if (fd1_closed && fd2_closed) {
+            goto ret;
         }
-        if (buff2_cnt < BUFFSIZE) {
-            FD_SET(fd2, &readset);
+        if (fd1_closed && buff1_cnt == 0) {
+            goto ret;
         }
-        if (buff1_cnt) {
-            FD_SET(fd2, &writeset);
+        if (fd2_closed && buff2_cnt == 0) {
+            goto ret;
         }
-        if (buff2_cnt) {
-            FD_SET(fd1, &writeset);
+
+        if (!fd1_closed) {
+            if (buff1_cnt < BUFFSIZE) {
+                FD_SET(fd1, &readset);
+            }
+            if (buff2_cnt) {
+                FD_SET(fd1, &writeset);
+            }
+        }
+        if (!fd2_closed) {
+            if (buff2_cnt < BUFFSIZE) {
+                FD_SET(fd2, &readset);
+            }
+            if (buff1_cnt) {
+                FD_SET(fd2, &writeset);
+            }
         }
 
         int n = select(max_fd, &readset, &writeset, NULL, NULL);
@@ -100,16 +116,16 @@ void bd_forword(int fd1, int fd2) {
         }
 
         if (FD_ISSET(fd1, &readset)) {
-            if (recv_buff(fd1, buff1, &buff1_cnt) <= 0) goto ret;
+            if (recv_buff(fd1, buff1, &buff1_cnt) <= 0) fd1_closed = 1;
         }
         if (FD_ISSET(fd2, &readset)) {
-            if (recv_buff(fd2, buff2, &buff2_cnt) <= 0) goto ret;
+            if (recv_buff(fd2, buff2, &buff2_cnt) <= 0) fd2_closed = 1;
         }
         if (FD_ISSET(fd1, &writeset)) {
-            if (send_buff(fd1, buff2, &buff2_cnt) <= 0) goto ret;
+            if (send_buff(fd1, buff2, &buff2_cnt) <= 0) fd1_closed = 1;
         }
         if (FD_ISSET(fd2, &writeset)) {
-            if (send_buff(fd2, buff1, &buff1_cnt) <= 0) goto ret;
+            if (send_buff(fd2, buff1, &buff1_cnt) <= 0) fd2_closed = 1;
         }
     }
 ret:
