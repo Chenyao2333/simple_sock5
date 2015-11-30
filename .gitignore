@@ -5,3 +5,4 @@ remote
 .DS_Store
 *.dSYM
 *.out
+core

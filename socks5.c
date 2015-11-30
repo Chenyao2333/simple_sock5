@@ -29,7 +29,8 @@ void send_reply(int clifd, uint8_t rep, uint16_t port) {
 }
 
 int parse_request(struct sockaddr_in *dst_addr, char buff[], int buff_cnt) {
-    char domain[256];
+    int i;
+    char domain[256+10];
 
     /*
     printf("buff_cnt = %d\n", buff_cnt);
@@ -38,6 +39,12 @@ int parse_request(struct sockaddr_in *dst_addr, char buff[], int buff_cnt) {
     }
     printf("\n");
     */
+
+    fprintf(stdout, "buff_cnt = %d\n", buff_cnt);
+    for (i = 0; i < buff_cnt; i++) {
+        fprintf(stdout, "%d ", (int)buff[i]);
+    }
+    fprintf(stdout, "\n");
 
     dst_addr->sin_family = AF_INET;
     memcpy(&dst_addr->sin_port, &buff[buff_cnt-2], 2);
@@ -60,7 +67,12 @@ int parse_request(struct sockaddr_in *dst_addr, char buff[], int buff_cnt) {
                 break;
             }
 
-            memcpy(&dst_addr->sin_addr.s_addr, *(hostt->h_addr_list), 4);
+            if (*(hostt->h_addr_list)) {
+                memcpy(&dst_addr->sin_addr.s_addr, *(hostt->h_addr_list), 4);
+            } else {
+                fprintf(stderr,"interasting! %s doesn't have A record!\n", domain);
+                return -1;
+            }
             break;
     }
     return 0;

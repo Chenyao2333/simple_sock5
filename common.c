@@ -50,7 +50,11 @@ void recv_send(int fd1, int fd2) {
 
 int recv_buff(int fd, char buff[], int *buff_cnt) {
     int n = enc_recv(fd, buff + (*buff_cnt), BUFFSIZE - (*buff_cnt), 0);
-    if (n >= 0) (*buff_cnt) += n;
+    if (n >= 0) {
+        (*buff_cnt) += n;
+    } else {
+        fprintf(stderr, "occur error: %s\n", strerror(errno));
+    }
     fprintf(stdout, "recv %d bytes from fd=%d\n", n, fd);
     return n;
 }
@@ -58,8 +62,10 @@ int recv_buff(int fd, char buff[], int *buff_cnt) {
 int send_buff(int fd, char buff[], int *buff_cnt) {
     int n = send(fd, buff, *buff_cnt, 0);
     if (n >= 0) {
-        memcpy(buff, buff + n, (*buff_cnt) - n);
+        memmove(buff, buff + n, (*buff_cnt) - n);
         (*buff_cnt) -= n;
+    } else {
+        fprintf(stderr, "occur error: %s\n", strerror(errno));
     }
     fprintf(stdout, "send %d bytes to fd=%d\n", n, fd);
     return n;
@@ -115,20 +121,21 @@ void bd_forword(int fd1, int fd2) {
             pthread_exit(NULL);
         }
 
-        if (FD_ISSET(fd1, &readset)) {
+        if (!fd1_closed && FD_ISSET(fd1, &readset)) {
             if (recv_buff(fd1, buff1, &buff1_cnt) <= 0) fd1_closed = 1;
         }
-        if (FD_ISSET(fd2, &readset)) {
+        if (!fd2_closed && FD_ISSET(fd2, &readset)) {
             if (recv_buff(fd2, buff2, &buff2_cnt) <= 0) fd2_closed = 1;
         }
-        if (FD_ISSET(fd1, &writeset)) {
+        if (!fd1_closed && FD_ISSET(fd1, &writeset)) {
             if (send_buff(fd1, buff2, &buff2_cnt) <= 0) fd1_closed = 1;
         }
-        if (FD_ISSET(fd2, &writeset)) {
+        if (!fd2_closed && FD_ISSET(fd2, &writeset)) {
             if (send_buff(fd2, buff1, &buff1_cnt) <= 0) fd2_closed = 1;
         }
     }
 ret:
+    sleep(10);
     fprintf(stdout, "forword be closed, err: %s\n", strerror(errno));
     close(fd1);
     close(fd2);
